@@ -1,31 +1,16 @@
-import os
 import glob
+from itertools import chain
 import numpy as np
+import os
 from os import path
+import pandas as pd
 from pathlib import Path 
 import torch
+from torch import Tensor
 from torch.utils.data import Dataset
 from torchvision.io import read_image
-from itertools import chain
-
-def get_age(lymph_df):
-  n = lymph_df.shape[0]
-  ages = np.zeros(n)
-  for i in range(n):
-    date_of_birth = lymph_df.DOB[i]
-    if '/' in date_of_birth:
-      year = date_of_birth.split('/')[-1]
-    elif '-' in date_of_birth:
-      year = date_of_birth.split('-')[-1]
-
-    # We do not have information of the year of the data acquisition so we will assume it was this year. 
-    # It shouldn't be relevant as it is an additive bias.  
-    ages[i] = 2024 - int(year)
-
-  lymph_df_out = lymph_df.drop(columns='DOB') 
-  lymph_df_out.insert(4, 'AGE', ages)
-  
-  return lymph_df_out
+from torchvision.transforms import Compose
+from typing import List
 
 class CustomDataset(Dataset):
     def __init__(self, img_dir, annotations, transform=None):
@@ -70,40 +55,41 @@ class CustomDataset(Dataset):
         
         return image, PID, label, gender, lymph_count
 
-class PatientDataset(Dataset):
-    """This dataset samples the images and metadata for each subject"""
+class BagDataset(Dataset):
+    """This dataset returns the images and clinical data for each patient."""
 
-    def __init__(self, img_dir, data_df, transform=None):
+    def __init__(self, img_dir: str, data_df: pd.DataFrame, transform: Compose = None) -> None:
         """
         Args:
-            img_dir: (str) path to the images directory.
-            data_df: (DataFrame) list of subjects used.
-            transform: Optional, transformations applied to the tensor
+            img_dir: Path to the images directory.
+            data_df: List of subjects used.
+            transform: Optional, transformations applied to the tensor.
         """
         self.img_dir = img_dir
         self.transform = transform
-        self.data_df = get_age(data_df)
+        self.data_df = data_df
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.data_df)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> "dict[List[Tensor], int, str, float, float, float]":
         """
         Args:
-            idx: (int) the index of the subject/session whom data is loaded.
+            idx: The index of the subject whose data is loaded.
         Returns:
-            sample: (dict) corresponding data described by the following keys:
-                images: (List) List with image tensors
-                label: (int) the diagnosis code
-                id: (str) ID of the participant
-                gender: (str) 'M' or 'F'
-                age: (int) age
+            sample: corresponding data described by the following keys:
+                images: List with image tensors.
+                label: The diagnosis code.
+                id: ID of the participant.
+                gender: 0.0 for male, '1' for female.
+                age: Age value.
+                lymph_count: Lymph count value. 
         """
 
         label = self.data_df.loc[idx, 'LABEL']
         age = self.data_df.loc[idx, 'AGE']
         gender = self.data_df.loc[idx, 'GENDER']
-
+        lymph_count = self.data_df.loc[idx, 'LYMPH_COUNT']
 
         id = self.data_df.loc[idx, 'ID']
         folder_name = path.join(self.img_dir, id)
@@ -116,5 +102,6 @@ class PatientDataset(Dataset):
           images.append(image)
 
         sample = {'images': images, 'label': label,
-                  'id': id, 'gender': gender, 'age': age}
+                  'id': id, 'gender': gender, 'age': age,
+                  'lymph_count': lymph_count}
         return sample
